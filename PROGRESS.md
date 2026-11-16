@@ -75,13 +75,97 @@ This is a map of the project, not a list to implement all at once. Start with mi
 
 ### 3. Start a small backend
 
-**What and why:** Create the NestJS application that will eventually handle uploads and questions. Begin with a simple way to confirm it is running.
+**Objective:** Create a backend that starts predictably, answers a simple health request, and refuses to start with invalid required settings. Complete the following steps separately; do not implement them all in one attempt.
 
-**Example:** `GET /health` returns a successful response containing a status such as `ok`.
+#### 3A. Create and understand the starter application
 
-**Your first task:** Scaffold the backend under `backend/`, run it, and locate the controller responsible for its initial route. We will then add the health endpoint and configuration checks separately.
+**Your task:** Scaffold a NestJS application under `backend/` using the official NestJS setup instructions and your chosen package manager. Run its development script from `backend/package.json`.
 
-**Done when:** The backend starts, the health endpoint responds, and missing required configuration produces a clear startup error once that configuration is introduced.
+Read these generated files:
+
+- `backend/src/main.ts`: the entry point that creates the application and starts listening for requests.
+- `backend/src/app.module.ts`: the root module that connects application components.
+- `backend/src/app.controller.ts`: the initial HTTP route handler.
+- `backend/package.json`: available scripts and installed dependencies.
+
+**Check:** Open the starter route using the address printed at startup. Confirm a response arrives. If startup fails, inspect the first relevant error before changing configuration or reinstalling packages.
+
+#### 3B. Add a basic health endpoint
+
+**Why:** A health endpoint lets you or an operator check whether the application can respond to HTTP requests.
+
+**Your task:** In the existing controller, define a handler for `GET /health` that returns a small JSON object such as `{"status":"ok"}` with HTTP status 200. Follow the route-handler pattern already present in the starter. A new module or health-check dependency is unnecessary for this simple endpoint.
+
+**Check:** Start the backend and request `/health` with your browser or API client. Inspect both the status code and response body. An automated HTTP check should later assert those same values.
+
+This is a basic liveness check: it shows that the application responds. It does not prove that the database or AI provider works. Dependency readiness checks belong to later steps when those dependencies exist.
+
+#### 3C. Define which settings the backend needs
+
+**Important distinction:** A `.env` file is one way to supply settings. Docker or the operating system can supply environment variables directly. A missing `.env` file should not cause failure if all needed values are already available.
+
+Start with a small configuration contract:
+
+| Setting | Needed now? | Rule | If absent |
+| --- | --- | --- | --- |
+| `PORT` | Yes, but has a default | Integer from 1 to 65535 | Use 3000. |
+| `DATABASE_URL` | Only when database integration is added | Nonempty connection URL using an accepted PostgreSQL scheme | Fail startup once database integration requires it. |
+| Provider API key | Only when the selected AI integration is added | Nonempty value under the provider-specific name we choose | Fail startup once that integration requires it. |
+
+Do not require a database URL or an AI key in the starter backend merely to demonstrate validation. Invalid `PORT` already gives us a meaningful failure case.
+
+**Files you will create or update:**
+
+- `backend/.env.example`: safe sample names and placeholder values. Commit this so another developer knows what to configure.
+- `backend/.env`: your local values if you choose to use a local environment file. Keep secrets out of Git.
+- The applicable `.gitignore`: ensure local secret-bearing environment files are ignored while `.env.example` is allowed.
+- `backend/src/config/validate-environment.ts`: a focused function that receives loaded settings, validates them, and returns normalized settings or throws an error.
+- `backend/src/app.module.ts`: connect configuration loading and validation during application initialization.
+- `backend/src/main.ts`: read the validated port rather than separately parsing raw environment values.
+
+These are planned files and responsibilities; they have not been created by this guide.
+
+#### 3D. Validate settings before accepting requests
+
+**How to approach it:** Read the official NestJS Configuration guide, specifically environment loading, custom validation, and reading settings through the configuration service. The standard `@nestjs/config` integration solves configuration loading; a small custom validator is enough initially. Check its current setup instructions before installing it yourself.
+
+The validator should follow this sequence:
+
+```text
+receive the loaded environment settings
+if PORT is absent, select the default 3000
+otherwise, convert PORT to a number
+reject blank, non-integer, or out-of-range PORT values
+when a feature introduces a required setting, validate it here too
+if validation fails, throw an error naming the setting and rule
+otherwise, return the settings with normalized values
+```
+
+Preserve other loaded settings in the returned configuration. Ensure the application uses the normalized port. Register validation during application initialization so a thrown validation error stops startup before the HTTP listener opens.
+
+**Example error:** `Invalid configuration: PORT must be an integer between 1 and 65535.` Later: `Invalid configuration: DATABASE_URL is required.` Never include secret values in errors.
+
+Use an error when the application cannot operate correctly without a setting. Use a default for genuinely optional settings. A warning is suitable only when continuing is intentional and the reduced behavior is clearly defined; warning and continuing with unusable required settings hides the problem.
+
+Configuration validation checks the shape and presence of values. A correctly shaped database URL does not prove the database is reachable, and a nonempty API key does not prove it is valid. Those need separate integration checks later.
+
+#### 3E. Verify success and failure deliberately
+
+Run each scenario separately, restarting the backend after changing startup settings:
+
+| Scenario | Expected result |
+| --- | --- |
+| No PORT supplied | Starts on the default port 3000. |
+| PORT is 4000 | Starts on port 4000; `/health` returns 200 and the expected JSON. |
+| PORT is `hello`, blank, 0, 65536, or 3000.5 | Startup fails with a useful message; this process does not begin serving HTTP. |
+| No `.env`, valid settings supplied through the process environment | Starts normally. |
+| Later, database integration exists but DATABASE_URL is absent from all sources | Startup fails before accepting requests. |
+
+When checking a failure, stop any earlier backend process so its responses do not make a failed startup look successful. For missing-variable tests, account for both the local `.env` and inherited environment variables.
+
+Add focused automated checks for the validator's default, valid conversion, invalid port, and future missing required setting. These checks protect real startup behavior. Do not call external services in validator unit tests.
+
+**Done when:** You have observed both a successful health request and a deliberate configuration failure, and can explain why a missing file differs from a missing setting. Share the relevant files and results for review; do not add database or AI integration yet.
 
 ### 4. Give the backend a database
 
